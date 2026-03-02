@@ -7,7 +7,7 @@ authors = [
   { name = "Sabareesh M B", email = "sabithesabareesh@gmail.com" }
 ]
 name = "promptarchive"
-version = "0.1.0"
+version = "1.0.0"
 description = "Local, Git-native prompt version control and regression testing."
 readme = "README.md"
 license = { text = "MIT" }

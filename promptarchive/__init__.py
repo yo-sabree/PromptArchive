@@ -2,6 +2,7 @@
 
 from promptarchive.core.prompt import Constraint, Prompt, PromptSnapshot
 from promptarchive.core.registry import PromptRegistry
+from promptarchive.privacy.pii import PIIDetector, PIIReport
 
-__all__ = ["Constraint", "Prompt", "PromptSnapshot", "PromptRegistry"]
+__all__ = ["Constraint", "Prompt", "PromptSnapshot", "PromptRegistry", "PIIDetector", "PIIReport"]
 __version__ = "0.1.0"

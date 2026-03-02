@@ -156,3 +156,120 @@ class TestCLI:
         assert rc == 0
         d = json.loads(buf.getvalue())
         assert "risk_level" in d
+
+    def test_register_and_list(self):
+        self._run_cli(["init"])
+        prompt_def = {
+            "id": "my_prompt",
+            "name": "My Prompt",
+            "content": "Say something useful.",
+            "constraints": [],
+            "tags": ["test"],
+        }
+        with open("prompt.json", "w") as fh:
+            json.dump(prompt_def, fh)
+        rc = self._run_cli(["register", "prompt.json"])
+        assert rc == 0
+        rc = self._run_cli(["list-prompts"])
+        assert rc == 0
+
+    def test_show_snapshot(self):
+        self._run_cli(["init"])
+        with open("out.txt", "w") as fh:
+            fh.write("Hello, world!")
+        self._run_cli(["snapshot", "greet", "out.txt", "--model", "gpt-4"])
+        rc = self._run_cli(["show", "greet"])
+        assert rc == 0
+
+    def test_show_snapshot_json(self):
+        self._run_cli(["init"])
+        with open("out.txt", "w") as fh:
+            fh.write("Hello, world!")
+        self._run_cli(["snapshot", "greet", "out.txt", "--model", "gpt-4"])
+        import io
+        from contextlib import redirect_stdout
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            rc = self._run_cli(["show", "greet", "--format", "json"])
+        assert rc == 0
+        d = json.loads(buf.getvalue())
+        assert d["prompt_id"] == "greet"
+
+    def test_delete_snapshot(self):
+        self._run_cli(["init"])
+        with open("out.txt", "w") as fh:
+            fh.write("Hello!")
+        self._run_cli(["snapshot", "greet", "out.txt"])
+        rc = self._run_cli(["delete", "greet", "--version", "v1"])
+        assert rc == 0
+
+    def test_delete_all_snapshots(self):
+        self._run_cli(["init"])
+        with open("out.txt", "w") as fh:
+            fh.write("Hello!")
+        self._run_cli(["snapshot", "greet", "out.txt"])
+        rc = self._run_cli(["delete", "greet", "--all"])
+        assert rc == 0
+
+    def test_stats(self):
+        self._run_cli(["init"])
+        with open("out.txt", "w") as fh:
+            fh.write("Hello!")
+        self._run_cli(["snapshot", "greet", "out.txt", "--model", "gpt-4"])
+        rc = self._run_cli(["stats"])
+        assert rc == 0
+
+    def test_stats_json(self):
+        self._run_cli(["init"])
+        with open("out.txt", "w") as fh:
+            fh.write("Hello!")
+        self._run_cli(["snapshot", "greet", "out.txt", "--model", "gpt-4"])
+        import io
+        from contextlib import redirect_stdout
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            rc = self._run_cli(["stats", "--format", "json"])
+        assert rc == 0
+        d = json.loads(buf.getvalue())
+        assert "total_snapshots" in d
+        assert d["total_snapshots"] >= 1
+
+    def test_export_and_import(self):
+        self._run_cli(["init"])
+        with open("out.txt", "w") as fh:
+            fh.write("Hello!")
+        self._run_cli(["snapshot", "greet", "out.txt"])
+        rc = self._run_cli(["export", "backup.zip"])
+        assert rc == 0
+        assert os.path.isfile("backup.zip")
+        rc = self._run_cli(["import-archive", "backup.zip"])
+        assert rc == 0
+
+    def test_search(self):
+        self._run_cli(["init"])
+        with open("out.txt", "w") as fh:
+            fh.write("Hello!")
+        self._run_cli(["snapshot", "greet", "out.txt", "--model", "gpt-4"])
+        rc = self._run_cli(["search", "--model", "gpt-4"])
+        assert rc == 0
+
+    def test_scan_no_pii(self):
+        with open("clean.txt", "w") as fh:
+            fh.write("This is a clean document with no sensitive data.")
+        rc = self._run_cli(["scan", "clean.txt"])
+        assert rc == 0
+
+    def test_scan_with_pii(self):
+        with open("pii.txt", "w") as fh:
+            fh.write("Contact alice@example.com or call 555-867-5309.")
+        rc = self._run_cli(["scan", "pii.txt"])
+        assert rc != 0  # non-zero = PII found
+
+    def test_scan_redact(self):
+        with open("pii2.txt", "w") as fh:
+            fh.write("Email: bob@example.org")
+        rc = self._run_cli(["scan", "pii2.txt", "--redact"])
+        assert rc != 0  # PII found
+        assert os.path.isfile("pii2.txt.redacted")
+        with open("pii2.txt.redacted") as fh:
+            assert "bob@example.org" not in fh.read()

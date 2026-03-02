@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# PromptArchive runtime data (local only, not for tracking)
+# .promptarchive/ is intentionally NOT ignored – it should be committed for version control
+
+# OS
+.DS_Store
+Thumbs.db

@@ -2,7 +2,7 @@
 
 **A simple, Git-native way to version and manage your prompts locally.**
 
-A lightweight tool to manage and version your prompts using Git - completely offline and private with tracking prompt behavior, detecting semantic drift, and running regression tests—completely offline, no cloud APIs, no telemetry.
+A lightweight tool to manage and version your prompts using Git - completely offline and private with tracking prompt behavior, detecting semantic drift, and running regression tests-completely offline, no cloud APIs, no telemetry.
 
 ## Installation
 

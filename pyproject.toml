@@ -3,6 +3,9 @@ requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
+authors = [
+  { name = "Sabareesh M B", email = "sabithesabareesh@gmail.com" }
+]
 name = "promptarchive"
 version = "0.1.0"
 description = "Local, Git-native prompt version control and regression testing."

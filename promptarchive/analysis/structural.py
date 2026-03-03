@@ -1,7 +1,8 @@
-"""Structural analysis: JSON schema drift and format changes between outputs."""
+"""Structural analysis: JSON schema drift and line-level diff for text outputs."""
 
 from __future__ import annotations
 
+import difflib
 import json
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Set
@@ -17,6 +18,10 @@ class StructuralDiff:
     type_changes: Dict[str, str] = field(default_factory=dict)
     format_change: Optional[str] = None  # e.g. "json->text"
     total_changes: int = 0
+    # Line-level diff for plain-text outputs (git-style unified diff lines)
+    text_diff: List[str] = field(default_factory=list)
+    lines_added: int = 0
+    lines_removed: int = 0
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -26,6 +31,9 @@ class StructuralDiff:
             "type_changes": self.type_changes,
             "format_change": self.format_change,
             "total_changes": self.total_changes,
+            "text_diff": self.text_diff,
+            "lines_added": self.lines_added,
+            "lines_removed": self.lines_removed,
         }
 
 
@@ -85,7 +93,22 @@ class StructuralAnalyzer:
             return diff
 
         if not old_is_json:
-            # Both are plain text – no structural diff possible
+            # Both are plain text – produce a line-level diff
+            old_lines = old_output.splitlines(keepends=True)
+            new_lines = new_output.splitlines(keepends=True)
+            unified = list(
+                difflib.unified_diff(
+                    old_lines, new_lines,
+                    fromfile="old", tofile="new",
+                    lineterm="",
+                )
+            )
+            added = sum(1 for l in unified if l.startswith("+") and not l.startswith("+++"))
+            removed = sum(1 for l in unified if l.startswith("-") and not l.startswith("---"))
+            diff.text_diff = unified
+            diff.lines_added = added
+            diff.lines_removed = removed
+            diff.total_changes = added + removed
             return diff
 
         old_keys = cls._flatten_keys(old_json)

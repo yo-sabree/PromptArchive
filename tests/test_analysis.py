@@ -40,9 +40,20 @@ class TestStructuralAnalyzer:
         assert "json->text" in (diff.format_change or "")
 
     def test_plain_text_no_diff(self):
-        diff = StructuralAnalyzer.analyze("hello world", "goodbye world")
+        # Identical plain text → zero changes (and no schema change)
+        diff = StructuralAnalyzer.analyze("hello world", "hello world")
         assert not diff.has_schema_change
         assert diff.total_changes == 0
+
+    def test_plain_text_with_diff(self):
+        # Different plain text → line-level diff with meaningful total_changes
+        diff = StructuralAnalyzer.analyze("hello world", "goodbye world")
+        assert not diff.has_schema_change  # no schema change for plain text
+        assert diff.total_changes > 0      # but changes are now captured
+        assert diff.lines_added >= 1
+        assert diff.lines_removed >= 1
+        assert any(l.startswith("+") and not l.startswith("+++") for l in diff.text_diff)
+        assert any(l.startswith("-") and not l.startswith("---") for l in diff.text_diff)
 
 
 class TestSemanticAnalyzer:
@@ -188,3 +199,202 @@ class TestFactualAnalyzer:
         )
         assert result.has_reference
         assert result.drift_level in ("moderate", "major")
+
+
+class TestSemanticPrecisionRecall:
+    def test_identical_precision_recall_one(self):
+        text = "The cat sat on the mat in the sun."
+        result = SemanticAnalyzer.analyze(text, text)
+        assert result.precision_score == 1.0
+        assert result.recall_score == 1.0
+
+    def test_precision_collapse_detected(self):
+        """High cosine similarity but low lexical precision should show in drift level."""
+        old = "The contract terminates on June 30 and includes liability clauses."
+        new = "A completely different topic about space and rockets."
+        result = SemanticAnalyzer.analyze(old, new)
+        # Precision should be low (few new words are in old)
+        assert result.precision_score < 0.6
+
+    def test_precision_recall_in_dict(self):
+        result = SemanticAnalyzer.analyze("hello world", "hello earth")
+        d = result.to_dict()
+        assert "precision_score" in d
+        assert "recall_score" in d
+        assert 0.0 <= d["precision_score"] <= 1.0
+        assert 0.0 <= d["recall_score"] <= 1.0
+
+    def test_drift_level_uses_precision(self):
+        """Drift level should be 'extreme' when precision collapses even if
+        topic similarity might otherwise be moderate."""
+        old = "Revenue grew 15% year-over-year driven by enterprise contracts."
+        new = "The history of ancient Rome spans over one thousand years."
+        result = SemanticAnalyzer.analyze(old, new)
+        # Precision/recall will be very low for completely different content
+        assert result.drift_level in ("significant", "extreme")
+
+
+class TestHallucinationImproved:
+    def test_sentence_start_not_entity(self):
+        """Words at sentence starts should NOT be flagged as new entities."""
+        old = "The project is complete."
+        new = "Adoption of new practices is complete."
+        risk = HallucinationDetector.detect(new, old)
+        # "Adoption" is at sentence start → should not be a new entity
+        assert "Adoption" not in risk.new_entities
+
+    def test_numeric_claim_detection(self):
+        """Numeric claims introduced in new output should be detected."""
+        old = "Revenue increased significantly last year."
+        new = "Revenue increased by 42% last year."
+        risk = HallucinationDetector.detect(new, old)
+        assert len(risk.new_numeric_claims) >= 1
+
+    def test_unsupported_numeric_claims_with_context(self):
+        """Numeric claims not in context should be flagged as unsupported."""
+        old = "Revenue increased significantly last year."
+        new = "Revenue increased by 42% last year."
+        context = "Revenue increased significantly."
+        risk = HallucinationDetector.detect(new, old, context=context)
+        assert len(risk.unsupported_numeric_claims) >= 1
+
+    def test_supported_numeric_claim_not_flagged(self):
+        """Numeric claims present in context should NOT be unsupported."""
+        old = "Revenue increased last year."
+        new = "Revenue increased by 42% last year."
+        context = "Revenue increased by 42% last year according to the report."
+        risk = HallucinationDetector.detect(new, old, context=context)
+        assert len(risk.unsupported_numeric_claims) == 0
+
+    def test_numeric_claims_in_dict(self):
+        old = "The price went up."
+        new = "The price went up by $10 million."
+        risk = HallucinationDetector.detect(new, old)
+        d = risk.to_dict()
+        assert "new_numeric_claims" in d
+        assert "unsupported_numeric_claims" in d
+
+
+class TestGating:
+    def _make_result(self):
+        from promptarchive.analysis.engine import AnalysisEngine
+        from promptarchive.core.prompt import PromptSnapshot
+
+        def snap(v, out):
+            return PromptSnapshot(
+                prompt_id="p", version=v, content="", output=out,
+                model="gpt-4", temperature=0.0,
+            )
+
+        engine = AnalysisEngine()
+        return engine.analyze(
+            snap("v1", "Hello world, this is a test."),
+            snap("v2", "Hello world, this is a test."),
+        )
+
+    def test_gate_passes_identical(self):
+        from promptarchive.analysis.gating import GateEvaluator, GatingThresholds
+        from promptarchive.analysis.engine import AnalysisEngine
+        from promptarchive.core.prompt import PromptSnapshot
+
+        def snap(v, out):
+            return PromptSnapshot(
+                prompt_id="p", version=v, content="", output=out,
+                model="gpt-4", temperature=0.0,
+            )
+
+        engine = AnalysisEngine()
+        result = engine.analyze(snap("v1", "Hello world."), snap("v2", "Hello world."))
+        gating = GateEvaluator().evaluate(result)
+        assert gating.passed
+
+    def test_gate_fails_on_constraint_violation(self):
+        from promptarchive.analysis.gating import GateEvaluator, GatingThresholds
+        from promptarchive.analysis.engine import AnalysisEngine
+        from promptarchive.core.prompt import PromptSnapshot, Constraint
+
+        c = Constraint(name="formal", tone="formal")
+        old = PromptSnapshot(
+            prompt_id="p", version="v1", content="", output="Furthermore, we proceed.",
+            model="gpt-4", temperature=0.0, constraints=[c],
+        )
+        new = PromptSnapshot(
+            prompt_id="p", version="v2", content="", output="Hey yeah gonna do it lol",
+            model="gpt-4", temperature=0.0, constraints=[c],
+        )
+        engine = AnalysisEngine()
+        result = engine.analyze(old, new)
+        gating = GateEvaluator().evaluate(result)
+        assert not gating.passed
+        assert any(lr.layer == "constraints" and not lr.passed for lr in gating.layer_results)
+
+    def test_gating_thresholds_from_dict(self):
+        from promptarchive.analysis.gating import GatingThresholds
+        data = {
+            "config_version": "2.0",
+            "min_semantic_similarity": 0.80,
+            "max_precision_drop": 0.20,
+            "fail_on_schema_change": True,
+        }
+        t = GatingThresholds.from_dict(data)
+        assert t.config_version == "2.0"
+        assert t.min_semantic_similarity == 0.80
+        assert t.fail_on_schema_change is True
+
+    def test_gating_thresholds_to_dict(self):
+        from promptarchive.analysis.gating import GatingThresholds
+        t = GatingThresholds()
+        d = t.to_dict()
+        assert "config_version" in d
+        assert "min_semantic_similarity" in d
+        assert "hallucination_fail_levels" in d
+
+    def test_gating_result_failed_layers(self):
+        from promptarchive.analysis.gating import GatingResult, LayerGateResult
+        g = GatingResult(
+            passed=False,
+            layer_results=[
+                LayerGateResult(layer="semantic", passed=True),
+                LayerGateResult(layer="hallucination", passed=False, reason="risk: high"),
+            ],
+        )
+        assert len(g.failed_layers) == 1
+        assert g.failed_layers[0].layer == "hallucination"
+
+    def test_gating_in_engine_analyze(self):
+        from promptarchive.analysis.engine import AnalysisEngine
+        from promptarchive.analysis.gating import GatingThresholds
+        from promptarchive.core.prompt import PromptSnapshot
+
+        t = GatingThresholds()
+        engine = AnalysisEngine(thresholds=t)
+        old = PromptSnapshot(
+            prompt_id="p", version="v1", content="", output="Hello world.",
+            model="gpt-4", temperature=0.0,
+        )
+        new = PromptSnapshot(
+            prompt_id="p", version="v2", content="", output="Hello world.",
+            model="gpt-4", temperature=0.0,
+        )
+        result = engine.analyze(old, new)
+        assert result.gating is not None
+        assert result.gating.passed
+
+    def test_gating_result_in_to_dict(self):
+        from promptarchive.analysis.engine import AnalysisEngine
+        from promptarchive.analysis.gating import GatingThresholds
+        from promptarchive.core.prompt import PromptSnapshot
+
+        engine = AnalysisEngine(thresholds=GatingThresholds())
+        old = PromptSnapshot(
+            prompt_id="p", version="v1", content="", output="Hello.",
+            model="gpt-4", temperature=0.0,
+        )
+        new = PromptSnapshot(
+            prompt_id="p", version="v2", content="", output="Hello.",
+            model="gpt-4", temperature=0.0,
+        )
+        d = engine.analyze(old, new).to_dict()
+        assert "gating" in d
+        assert "passed" in d["gating"]
+        assert "layer_results" in d["gating"]

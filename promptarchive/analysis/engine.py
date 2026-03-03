@@ -7,6 +7,7 @@ from typing import Any, Dict, List, Optional
 
 from promptarchive.analysis.constraints import ConstraintResult, ConstraintValidator
 from promptarchive.analysis.factual import FactualDrift, FactualAnalyzer
+from promptarchive.analysis.gating import GateEvaluator, GatingResult, GatingThresholds
 from promptarchive.analysis.hallucination import HallucinationRisk, HallucinationDetector
 from promptarchive.analysis.semantic import SemanticResult, SemanticAnalyzer
 from promptarchive.analysis.structural import StructuralDiff, StructuralAnalyzer
@@ -32,8 +33,11 @@ class RegressionResult:
     hallucination: HallucinationRisk
     factual: FactualDrift
 
+    # Gating verdict (populated when thresholds are provided)
+    gating: Optional[GatingResult] = None
+
     def to_dict(self) -> Dict[str, Any]:
-        return {
+        d: Dict[str, Any] = {
             "prompt_id": self.prompt_id,
             "old_version": self.old_version,
             "new_version": self.new_version,
@@ -46,6 +50,9 @@ class RegressionResult:
             "hallucination": self.hallucination.to_dict(),
             "factual": self.factual.to_dict(),
         }
+        if self.gating is not None:
+            d["gating"] = self.gating.to_dict()
+        return d
 
 
 def _compute_risk(
@@ -92,13 +99,21 @@ def _compute_risk(
 class AnalysisEngine:
     """Orchestrates all 6 analysis layers to produce a RegressionResult."""
 
+    def __init__(self, thresholds: Optional[GatingThresholds] = None) -> None:
+        self._evaluator = GateEvaluator(thresholds) if thresholds else None
+
     def analyze(
         self,
         old_snapshot: PromptSnapshot,
         new_snapshot: PromptSnapshot,
         reference_answer: Optional[str] = None,
+        thresholds: Optional[GatingThresholds] = None,
     ) -> RegressionResult:
-        """Run all analysis layers and return a consolidated RegressionResult."""
+        """Run all analysis layers and return a consolidated RegressionResult.
+
+        ``thresholds`` supplied here override any thresholds set on the
+        engine instance for this single call.
+        """
 
         semantic = SemanticAnalyzer.analyze(old_snapshot.output, new_snapshot.output)
         structural = StructuralAnalyzer.analyze(old_snapshot.output, new_snapshot.output)
@@ -123,7 +138,7 @@ class AnalysisEngine:
             or (factual.has_reference and factual.drift_level != "none")
         )
 
-        return RegressionResult(
+        result = RegressionResult(
             prompt_id=new_snapshot.prompt_id,
             old_version=old_snapshot.version,
             new_version=new_snapshot.version,
@@ -136,3 +151,10 @@ class AnalysisEngine:
             hallucination=hallucination,
             factual=factual,
         )
+
+        # Apply gating if thresholds are available
+        evaluator = GateEvaluator(thresholds) if thresholds else self._evaluator
+        if evaluator is not None:
+            result.gating = evaluator.evaluate(result)
+
+        return result

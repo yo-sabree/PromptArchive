@@ -1,5 +1,8 @@
 # PromptArchive
 
+<img width="1536" height="1024" alt="ChatGPT Image Mar 3, 2026, 05_09_45 PM" src="https://github.com/user-attachments/assets/58eaaad2-0cb4-4fee-a57c-aaa0f0363ded" />
+
+
 **A simple, Git-native way to version and manage your prompts locally.**
 
 A lightweight tool to manage and version your prompts using Git - completely offline and private with tracking prompt behavior, detecting semantic drift, and running regression tests-completely offline, no cloud APIs, no telemetry.

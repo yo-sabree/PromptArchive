@@ -75,7 +75,7 @@ class TestRegressionReport:
         text = RegressionReport.generate_text(self.result)
         assert "REGRESSION REPORT" in text
         assert "LAYER 1: SEMANTIC SIMILARITY" in text
-        assert "LAYER 2: STRUCTURAL ANALYSIS" in text
+        assert "LAYER 2: STRUCTURAL DIFF" in text
         assert "LAYER 3: TONE SHIFT" in text
         assert "LAYER 4: CONSTRAINTS" in text
         assert "LAYER 5: HALLUCINATION RISK" in text
@@ -140,7 +140,55 @@ class TestCLI:
         rc = self._run_cli(["diff", "greet"])
         assert rc == 0
 
-    def test_diff_json_format(self):
+    def test_diff_with_gate_flag(self):
+        self._run_cli(["init"])
+        with open("v1.txt", "w") as fh:
+            fh.write("Hello, this is version one.")
+        with open("v2.txt", "w") as fh:
+            fh.write("Hello, this is version one.")  # identical → gate passes
+        self._run_cli(["snapshot", "greet", "v1.txt"])
+        self._run_cli(["snapshot", "greet", "v2.txt"])
+        rc = self._run_cli(["diff", "greet", "--gate"])
+        assert rc == 0  # gate passes for identical snapshots
+
+    def test_diff_with_config_file(self):
+        self._run_cli(["init"])
+        with open("v1.txt", "w") as fh:
+            fh.write("Hello, this is version one.")
+        with open("v2.txt", "w") as fh:
+            fh.write("Hello, this is version one.")
+        self._run_cli(["snapshot", "greet", "v1.txt"])
+        self._run_cli(["snapshot", "greet", "v2.txt"])
+        # Write a config file with default thresholds
+        config = {
+            "config_version": "test-1.0",
+            "min_semantic_similarity": 0.70,
+            "fail_on_constraint_violation": True,
+        }
+        with open("gate.json", "w") as fh:
+            json.dump(config, fh)
+        rc = self._run_cli(["diff", "greet", "--config", "gate.json"])
+        assert rc == 0
+
+    def test_diff_gate_json_contains_gating(self):
+        self._run_cli(["init"])
+        with open("v1.txt", "w") as fh:
+            fh.write("Hello, this is version one.")
+        with open("v2.txt", "w") as fh:
+            fh.write("Hello, this is version one.")
+        self._run_cli(["snapshot", "greet", "v1.txt"])
+        self._run_cli(["snapshot", "greet", "v2.txt"])
+        import io
+        from contextlib import redirect_stdout
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            rc = self._run_cli(["diff", "greet", "--gate", "--format", "json"])
+        assert rc == 0
+        d = json.loads(buf.getvalue())
+        assert "gating" in d
+        assert d["gating"]["passed"] is True
+
+    def test_diff_register(self):
         self._run_cli(["init"])
         with open("v1.txt", "w") as fh:
             fh.write("Hello world.")
@@ -156,6 +204,10 @@ class TestCLI:
         assert rc == 0
         d = json.loads(buf.getvalue())
         assert "risk_level" in d
+        # structural diff should include text_diff for plain text
+        assert "text_diff" in d["structural"]
+        assert "lines_added" in d["structural"]
+        assert "lines_removed" in d["structural"]
 
     def test_register_and_list(self):
         self._run_cli(["init"])

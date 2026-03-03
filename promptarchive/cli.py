@@ -9,6 +9,7 @@ import sys
 from typing import Optional
 
 from promptarchive.analysis.engine import AnalysisEngine
+from promptarchive.analysis.gating import GatingThresholds
 from promptarchive.analysis.report import RegressionReport
 from promptarchive.core.prompt import Prompt, Constraint
 from promptarchive.core.registry import PromptRegistry
@@ -156,17 +157,34 @@ def cmd_diff(args: argparse.Namespace) -> int:
         else:
             reference = args.reference
 
+    # Load optional gating thresholds
+    thresholds: Optional[GatingThresholds] = None
+    if args.config:
+        if not os.path.isfile(args.config):
+            print(f"Error: config file '{args.config}' not found.", file=sys.stderr)
+            return 1
+        with open(args.config, encoding="utf-8") as fh:
+            thresholds = GatingThresholds.from_dict(json.load(fh))
+    elif args.gate:
+        # --gate flag: use default thresholds
+        thresholds = GatingThresholds()
+
     engine = AnalysisEngine()
     result = engine.analyze(
         old_snapshot=old_snapshot,
         new_snapshot=new_snapshot,
         reference_answer=reference,
+        thresholds=thresholds,
     )
 
     if args.format == "json":
         print(RegressionReport.generate_json(result))
     else:
         print(RegressionReport.generate_text(result))
+
+    # Non-zero exit when gating is active and the gate failed
+    if result.gating is not None and not result.gating.passed:
+        return 1
 
     return 0
 
@@ -409,6 +427,21 @@ def build_parser() -> argparse.ArgumentParser:
         choices=["text", "json"],
         default="text",
         help="Output format (default: text)",
+    )
+    diff_parser.add_argument(
+        "--config",
+        default=None,
+        metavar="FILE",
+        help=(
+            "Path to a JSON gating-threshold config file. "
+            "Enables pass/fail gating; non-zero exit when gate fails."
+        ),
+    )
+    diff_parser.add_argument(
+        "--gate",
+        action="store_true",
+        default=False,
+        help="Enable gating with default thresholds (overridden by --config).",
     )
 
     # register

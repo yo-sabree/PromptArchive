@@ -17,6 +17,10 @@ class SemanticResult:
     drift_level: str  # "none" | "minimal" | "moderate" | "significant" | "extreme"
     direction: str  # "increased" | "decreased" | "stable"
     method: str  # "embeddings" | "tfidf"
+    # Lexical precision/recall: independent of embedding similarity so that
+    # surface-topic similarity cannot mask content-level regressions.
+    precision_score: float = 1.0  # fraction of new-output tokens found in old output
+    recall_score: float = 1.0    # fraction of old-output tokens preserved in new output
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -24,17 +28,27 @@ class SemanticResult:
             "drift_level": self.drift_level,
             "direction": self.direction,
             "method": self.method,
+            "precision_score": round(self.precision_score, 4),
+            "recall_score": round(self.recall_score, 4),
         }
 
 
-def _drift_level(score: float) -> str:
-    if score >= 0.95:
+def _drift_level(similarity: float, precision: float, recall: float) -> str:
+    """Derive drift level from similarity AND lexical precision/recall.
+
+    Pure cosine/embedding similarity can remain high even when the new output
+    covers very different content (same topic, different facts).  We therefore
+    use the *minimum* of similarity, precision and recall as the governing
+    signal so that a precision collapse is never masked.
+    """
+    effective = min(similarity, precision, recall)
+    if effective >= 0.95:
         return "none"
-    if score >= 0.85:
+    if effective >= 0.85:
         return "minimal"
-    if score >= 0.70:
+    if effective >= 0.70:
         return "moderate"
-    if score >= 0.50:
+    if effective >= 0.50:
         return "significant"
     return "extreme"
 
@@ -88,6 +102,25 @@ def _tfidf_similarity(text1: str, text2: str) -> float:
     return _cosine(v1, v2)
 
 
+def _lexical_precision_recall(old_text: str, new_text: str) -> tuple:
+    """Return (precision, recall) based on token-level overlap.
+
+    precision = |new ∩ old| / |new|   (how much of new is in old)
+    recall    = |new ∩ old| / |old|   (how much of old is preserved in new)
+
+    Both are token-set overlap so they complement cosine similarity by
+    capturing *content coverage*, not just directional similarity.
+    """
+    old_tokens = set(_tokenize(old_text))
+    new_tokens = set(_tokenize(new_text))
+    if not old_tokens and not new_tokens:
+        return 1.0, 1.0
+    intersection = old_tokens & new_tokens
+    precision = len(intersection) / len(new_tokens) if new_tokens else 0.0
+    recall = len(intersection) / len(old_tokens) if old_tokens else 0.0
+    return precision, recall
+
+
 # ---------------------------------------------------------------------------
 # Main analyzer
 # ---------------------------------------------------------------------------
@@ -133,9 +166,13 @@ class SemanticAnalyzer:
             score = _tfidf_similarity(old_output, new_output)
             method = "tfidf"
 
+        precision, recall = _lexical_precision_recall(old_output, new_output)
+
         return SemanticResult(
             similarity_score=score,
-            drift_level=_drift_level(score),
+            drift_level=_drift_level(score, precision, recall),
             direction=_direction(1.0, score),
             method=method,
+            precision_score=precision,
+            recall_score=recall,
         )

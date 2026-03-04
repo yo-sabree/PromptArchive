@@ -39,7 +39,7 @@ PromptArchive is a lightweight tool to manage, version, and regression-test your
 
 ## Why PromptArchive?
 
-LLM prompts drift over time. A prompt that produced reliable legal summaries in January may produce subtly different — or dangerously wrong — output in June after a model upgrade, a temperature tweak, or a system-prompt change. Most teams notice the regression only after a user complaint.
+LLM prompts drift over time. A prompt that produced reliable legal summaries in January may produce subtly different  or dangerously wrong output in June after a model upgrade, a temperature tweak, or a system-prompt change. Most teams notice the regression only after a user complaint.
 
 **PromptArchive solves this by treating prompts like code:**
 

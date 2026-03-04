@@ -75,6 +75,8 @@ class PromptSnapshot:
         ts = data.get("timestamp")
         if isinstance(ts, str):
             ts = datetime.fromisoformat(ts)
+            if ts.tzinfo is None:
+                ts = ts.replace(tzinfo=timezone.utc)
         elif ts is None:
             ts = datetime.now(timezone.utc)
         return cls(

@@ -59,6 +59,33 @@ class TestPromptSnapshot:
         assert s2.context == "some context"
         assert s2.metadata == {"key": "val"}
 
+    def test_from_dict_timezone_naive_timestamp_becomes_utc(self):
+        """Naive ISO timestamps loaded from dict must become timezone-aware."""
+        data = {
+            "prompt_id": "test",
+            "version": "v1",
+            "content": "",
+            "output": "hi",
+            "model": "gpt-4",
+            "temperature": 0.0,
+            "timestamp": "2024-01-15T10:00:00",  # no timezone info
+        }
+        s = PromptSnapshot.from_dict(data)
+        assert s.timestamp.tzinfo is not None
+
+    def test_from_dict_timezone_aware_timestamp_preserved(self):
+        """Timezone-aware ISO timestamps must be preserved as-is."""
+        data = {
+            "prompt_id": "test",
+            "version": "v1",
+            "content": "",
+            "output": "hi",
+            "model": "gpt-4",
+            "temperature": 0.0,
+            "timestamp": "2024-01-15T10:00:00+00:00",
+        }
+        s = PromptSnapshot.from_dict(data)
+        assert s.timestamp.tzinfo is not None
 
 class TestPrompt:
     def test_add_snapshot(self):

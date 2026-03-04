@@ -5,4 +5,4 @@ from promptarchive.core.registry import PromptRegistry
 from promptarchive.privacy.pii import PIIDetector, PIIReport
 
 __all__ = ["Constraint", "Prompt", "PromptSnapshot", "PromptRegistry", "PIIDetector", "PIIReport"]
-__version__ = "0.1.0"
+__version__ = "1.0.0"

@@ -67,6 +67,13 @@ class TestSnapshotStore:
         count = self.store.delete_prompt("nonexistent")
         assert count == 0
 
+    def test_list_snapshots_numeric_order(self):
+        """Snapshots should be returned in numeric version order (v1 < v2 < v10)."""
+        for v in ("v1", "v10", "v2", "v3"):
+            self.store.save_snapshot(self._make_snapshot(version=v))
+        versions = [s.version for s in self.store.list_snapshots("greet")]
+        assert versions == ["v1", "v2", "v3", "v10"]
+
 
 class TestSnapshotSearch:
     def setup_method(self):

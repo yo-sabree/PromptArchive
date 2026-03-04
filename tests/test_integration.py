@@ -325,3 +325,98 @@ class TestCLI:
         assert os.path.isfile("pii2.txt.redacted")
         with open("pii2.txt.redacted") as fh:
             assert "bob@example.org" not in fh.read()
+
+    def test_validate_passes(self):
+        self._run_cli(["init"])
+        prompt_def = {
+            "id": "formal_prompt",
+            "name": "Formal Prompt",
+            "content": "Write formally.",
+            "constraints": [
+                {"name": "must_have_clause", "must_include": ["termination clause"]}
+            ],
+            "tags": [],
+        }
+        with open("prompt.json", "w") as fh:
+            json.dump(prompt_def, fh)
+        self._run_cli(["register", "prompt.json"])
+        with open("good_output.txt", "w") as fh:
+            fh.write("The agreement includes a termination clause effective immediately.")
+        rc = self._run_cli(["validate", "formal_prompt", "good_output.txt"])
+        assert rc == 0
+
+    def test_validate_fails(self):
+        self._run_cli(["init"])
+        prompt_def = {
+            "id": "formal_prompt2",
+            "name": "Formal Prompt 2",
+            "content": "Write formally.",
+            "constraints": [
+                {"name": "must_have_clause", "must_include": ["termination clause"]}
+            ],
+            "tags": [],
+        }
+        with open("prompt2.json", "w") as fh:
+            json.dump(prompt_def, fh)
+        self._run_cli(["register", "prompt2.json"])
+        with open("bad_output.txt", "w") as fh:
+            fh.write("This document says nothing relevant.")
+        rc = self._run_cli(["validate", "formal_prompt2", "bad_output.txt"])
+        assert rc != 0
+
+    def test_validate_unregistered_prompt(self):
+        self._run_cli(["init"])
+        with open("out.txt", "w") as fh:
+            fh.write("Some output.")
+        rc = self._run_cli(["validate", "nonexistent_prompt", "out.txt"])
+        assert rc != 0
+
+    def test_validate_json_format(self):
+        self._run_cli(["init"])
+        prompt_def = {
+            "id": "json_validate_prompt",
+            "name": "JSON Validate",
+            "content": "content",
+            "constraints": [{"name": "short", "max_length": 5}],
+            "tags": [],
+        }
+        with open("pj.json", "w") as fh:
+            json.dump(prompt_def, fh)
+        self._run_cli(["register", "pj.json"])
+        with open("long_output.txt", "w") as fh:
+            fh.write("This output is longer than 5 characters.")
+        import io
+        from contextlib import redirect_stdout
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            rc = self._run_cli(["validate", "json_validate_prompt", "long_output.txt", "--format", "json"])
+        assert rc != 0
+        d = json.loads(buf.getvalue())
+        assert d["passed"] is False
+        assert d["violation_count"] >= 1
+
+    def test_diff_from_to_version(self):
+        self._run_cli(["init"])
+        with open("v1.txt", "w") as fh:
+            fh.write("Hello, version one.")
+        with open("v2.txt", "w") as fh:
+            fh.write("Hello, version two.")
+        with open("v3.txt", "w") as fh:
+            fh.write("Hello, version three.")
+        self._run_cli(["snapshot", "greet", "v1.txt"])
+        self._run_cli(["snapshot", "greet", "v2.txt"])
+        self._run_cli(["snapshot", "greet", "v3.txt"])
+        # Compare v1 to v3 explicitly (skipping v2)
+        rc = self._run_cli(["diff", "greet", "--from-version", "v1", "--to-version", "v3"])
+        assert rc == 0
+
+    def test_diff_invalid_version(self):
+        self._run_cli(["init"])
+        with open("v1.txt", "w") as fh:
+            fh.write("Hello.")
+        with open("v2.txt", "w") as fh:
+            fh.write("Hello!")
+        self._run_cli(["snapshot", "greet", "v1.txt"])
+        self._run_cli(["snapshot", "greet", "v2.txt"])
+        rc = self._run_cli(["diff", "greet", "--from-version", "v99"])
+        assert rc != 0

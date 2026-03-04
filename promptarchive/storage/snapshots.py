@@ -80,16 +80,23 @@ class SnapshotStore:
         return None
 
     def list_snapshots(self, prompt_id: str) -> List[PromptSnapshot]:
-        """Return all snapshots for a prompt, ordered by version string."""
+        """Return all snapshots for a prompt, ordered by version number."""
         safe_id = _safe_name(prompt_id)
         prompt_dir = os.path.join(self.snapshots_dir, safe_id)
         if not os.path.isdir(prompt_dir):
             return []
         snapshots = []
-        for fname in sorted(os.listdir(prompt_dir)):
+        for fname in os.listdir(prompt_dir):
             snapshot = self._load_file(os.path.join(prompt_dir, fname))
             if snapshot is not None:
                 snapshots.append(snapshot)
+        # Sort numerically by the integer in the version string (e.g. v1 < v2 < v10).
+        # Fall back to lexicographic sort for non-standard version names.
+        def _version_key(s: "PromptSnapshot") -> tuple:
+            import re as _re
+            m = _re.match(r"v(\d+)$", s.version)
+            return (0, int(m.group(1))) if m else (1, s.version)
+        snapshots.sort(key=_version_key)
         return snapshots
 
     def _load_file(self, path: str) -> Optional[PromptSnapshot]:

@@ -102,7 +102,6 @@ def cmd_snapshot(args: argparse.Namespace) -> int:
 
     # Build a minimal snapshot (no Prompt object required)
     from promptarchive.core.prompt import PromptSnapshot
-    from datetime import datetime, timezone
 
     # Load prompt content from registry if available
     registry = _get_registry()
@@ -146,8 +145,22 @@ def cmd_diff(args: argparse.Namespace) -> int:
         )
         return 1
 
-    old_snapshot = snapshots[-2]
-    new_snapshot = snapshots[-1]
+    from_version: Optional[str] = getattr(args, "from_version", None)
+    to_version: Optional[str] = getattr(args, "to_version", None)
+
+    if from_version or to_version:
+        snap_map = {s.version: s for s in snapshots}
+        if from_version and from_version not in snap_map:
+            print(f"Error: version '{from_version}' not found for '{args.prompt_id}'.", file=sys.stderr)
+            return 1
+        if to_version and to_version not in snap_map:
+            print(f"Error: version '{to_version}' not found for '{args.prompt_id}'.", file=sys.stderr)
+            return 1
+        old_snapshot = snap_map[from_version] if from_version else snapshots[-2]
+        new_snapshot = snap_map[to_version] if to_version else snapshots[-1]
+    else:
+        old_snapshot = snapshots[-2]
+        new_snapshot = snapshots[-1]
 
     reference: Optional[str] = None
     if args.reference:
@@ -353,6 +366,48 @@ def cmd_import_archive(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_validate(args: argparse.Namespace) -> int:
+    """Validate an output file against a registered prompt's constraints."""
+    if not os.path.isfile(args.output_file):
+        print(f"Error: output file '{args.output_file}' not found.", file=sys.stderr)
+        return 1
+
+    registry = _get_registry()
+    prompt = registry.get(args.prompt_id)
+    if prompt is None:
+        print(
+            f"Error: prompt '{args.prompt_id}' not registered. "
+            "Use 'promptarchive register' first.",
+            file=sys.stderr,
+        )
+        return 1
+
+    if not prompt.constraints:
+        print(f"Prompt '{args.prompt_id}' has no constraints defined. Nothing to validate.")
+        return 0
+
+    with open(args.output_file, encoding="utf-8") as fh:
+        output_text = fh.read()
+
+    from promptarchive.analysis.constraints import ConstraintValidator
+    result = ConstraintValidator.validate(output_text, prompt.constraints)
+
+    if args.format == "json":
+        print(json.dumps(result.to_dict(), indent=2, ensure_ascii=False))
+    else:
+        if result.passed:
+            print(f"✓ All {len(prompt.constraints)} constraint(s) passed.")
+        else:
+            print(
+                f"✗ {result.violation_count} violation(s) found "
+                f"(out of {len(prompt.constraints)} constraint(s)):"
+            )
+            for v in result.violations:
+                print(f"  [{v.constraint_name}] {v.constraint_type}: {v.message}")
+
+    return 0 if result.passed else 1
+
+
 def cmd_scan(args: argparse.Namespace) -> int:
     """Scan a file for PII before committing it as a snapshot."""
     if not os.path.isfile(args.file):
@@ -436,6 +491,20 @@ def build_parser() -> argparse.ArgumentParser:
             "Path to a JSON gating-threshold config file. "
             "Enables pass/fail gating; non-zero exit when gate fails."
         ),
+    )
+    diff_parser.add_argument(
+        "--from-version",
+        default=None,
+        dest="from_version",
+        metavar="VERSION",
+        help="Compare from this specific version (default: second-to-last)",
+    )
+    diff_parser.add_argument(
+        "--to-version",
+        default=None,
+        dest="to_version",
+        metavar="VERSION",
+        help="Compare to this specific version (default: latest)",
     )
     diff_parser.add_argument(
         "--gate",
@@ -532,6 +601,22 @@ def build_parser() -> argparse.ArgumentParser:
         help="Write a redacted copy alongside the original",
     )
 
+    # validate
+    validate_parser = sub.add_parser(
+        "validate",
+        help="Validate an output file against a registered prompt's constraints.",
+    )
+    validate_parser.add_argument("prompt_id", help="Prompt ID (must be registered)")
+    validate_parser.add_argument(
+        "output_file", help="Path to the file containing the LLM output to validate"
+    )
+    validate_parser.add_argument(
+        "--format",
+        choices=["text", "json"],
+        default="text",
+        help="Output format (default: text)",
+    )
+
     return parser
 
 
@@ -553,6 +638,7 @@ def main(argv: Optional[list] = None) -> int:
         "export": cmd_export,
         "import-archive": cmd_import_archive,
         "scan": cmd_scan,
+        "validate": cmd_validate,
     }
 
     handler = handlers.get(args.command)
